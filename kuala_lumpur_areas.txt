@@ -1,0 +1,24 @@
+1, Ampang
+2, Bangsar
+3, Bangsar South
+4, Batu Caves
+5, Brickfields
+6, Bukit Bintang
+7, Bukit Jalil
+8, Cheras
+9, Damansara Heights
+10, Kepong
+11, KLCC
+12, Kuchai Lama
+13, Mont Kiara
+14, Segambut
+15, Sentul
+16, Seputeh
+17, Setapak
+18, Sri Hartamas
+19, Sri Petaling
+20, Sungai Besi
+21, Taman Desa
+22, TitiWangsa
+23, Taman Tun Dr Ismail
+24, Wangsa Maju
