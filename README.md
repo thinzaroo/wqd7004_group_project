@@ -41,5 +41,6 @@ Next:
 - Where are the outliers and why should you care about them?
 - How can you add, change or remove features to get more out of your data?
 
-
+Research Questions: 
+https://docs.google.com/document/d/13hJNOODNH9XW55rJIhmNJZhbspSvF81k-gwodAnnh8A/edit?usp=sharing
 
