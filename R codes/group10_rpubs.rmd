@@ -1,0 +1,835 @@
+---
+title: "WQD7004 Group Project"
+author: "Group 10: Thinzar Oo (17219923), Ang Lin Siang (17174507), Goh Ting Sheng (s2032766)"
+date: "10/06/2021"
+output:
+ html_document:
+    toc: true
+    toc_depth: 3  # upto three depths of headings (specified by #, ## and ###)
+    toc_float: true
+---
+```{css, echo = FALSE}
+
+body {
+text-align: justify;
+}
+.pkgName {
+    color: #e67913;
+    font-style: italic;
+}
+.emphasis{
+    color: #ba0001;
+    font-style: italic;
+}
+.header1 {
+    color: #0026ca;
+    padding-top: 10px;
+}
+.header2 {
+    color: #0026ca;
+    padding-top: 5px;
+}
+ul li { padding: 5px 0px; }
+ol li { padding: 5px 0px; }
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<h3> Project Title: <span style="color:#418494">House Rental Market in Kuala Lumpur, a simple analysis</h3>
+
+## <span class="header1">1 Introduction</span>
+### <span class="header2">1.1 Introduction to Datasets</span>
+The aim of our group project is to analyze the latest trends in Kuala Lumpur’s house rental market. There aren’t any dataset with latest rental data are available on the web, so we have chosen to scrape from one of the most popular property portal in Malaysia: www.iproperty.com.my. Our team has decided to perform raw collection on 16th May, for the following 24 areas in Kuala Lumpur, we managed to collect 4759 data rows and 18 variables. The areas we covered are:
+
+```{r echo=FALSE, results='asis'}
+library(knitr)
+areas <- c("Ampang", "Bangsar", "Bangsar South", "Batu Caves", "Brickfields", "Bukit Bintang", "Bukit Jalil", 
+"Cheras", "Damansara Heights", "Kepong", "KLCC", "Kuchai Lama", "Mont Kiara", "Segambut", "Sentul", 
+"Seputeh", "Setapak", "Sri Hartamas", "Sri Petaling", "Sungai Besi", "Taman Desa", "TitiWangsa", "Taman Tun Dr Ismail", "Wangsa Maju")
+
+areas_matrix <- matrix(areas, nrow = 6, ncol = 4)
+kable(areas_matrix)
+```
+
+We limit our scope of this project to study only condo and serviced apartments in Kuala Lumpur area. We omit the apartment, terrace houses, etc. Our principal data collection is based on the following filters:  
+<ul>
+<li>Target Area: Kuala Lumpur</li>
+<li>Residential Type: Condo/Serviced Apartments</li>
+<li>Category: Rental</li>
+<li>Sort type: recent</li>
+</ul>
+ 
+### <span class="header2"> 1.2 Decription of variables</span>
+
+[1] <span class="emphasis">name:</span> full name with area                    
+[2] <span class="emphasis">propertyName:</span> the name of property            
+[3] <span class="emphasis">rental:</span> monthly rental price                  
+[4] <span class="emphasis">pricePerSizeUnitBuiltUp:</span> rental price per built up size  
+[5] <span class="emphasis">address:</span> address of the property                 
+[6] <span class="emphasis">lat:</span> latitude                     
+[7] <span class="emphasis">lng:</span> longitude                     
+[8] <span class="emphasis">city:</span> city name                     
+[9] <span class="emphasis">district:</span> district name                
+[10] <span class="emphasis">bedrooms:</span> total number of bedrooms                
+[11] <span class="emphasis">bathrooms:</span> total number of bathrooms               
+[12] <span class="emphasis">builtUp:</span> built up size in square feet                
+[13] <span class="emphasis">carParks:</span> total number of car parks                
+[14] <span class="emphasis">furnishing:</span> furnishing type - fully/partially furnished or unfurnished              
+[15] <span class="emphasis">postedDate:</span> the date of the ad posted on the site              
+[16] <span class="emphasis">buildingId:</span> unique ID of the building             
+[17] <span class="emphasis">unitType:</span> unit type, for example, corner lot                
+[18] <span class="emphasis">propertyType:</span> property type, condo or serviced apartment   
+
+### <span class="header2">1.3 Libraries Used</span>
+R package required for the project is loaded.
+```{r comment=FALSE,results=FALSE,cache=FALSE,warning=FALSE,message=FALSE}
+library(Amelia)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(tidyverse)
+library(selectr)
+library(xml2)
+library(rvest)
+library(jsonlite)
+library(knitr)
+library(gridExtra)
+library(kableExtra)
+library(PerformanceAnalytics)
+library(caret)
+library(rmarkdown)
+library(randomForest)
+```
+                      
+## <span class="header1">2. Data Curation</span>
+### <span class="header2">2.1 Brief Explanation</span>
+We have initially planned to use <span class="pkgName">rvest</span> package to scrape from the website, but the site seems to ban the user-agent of web scrapers, it returns "ERROR 429". So, we downloaded the HTML pages manually. After checking the source code, we found the JSON in their HTML source. We used <span class="pkgName">xml2</span> package with <span class="pkgName">rvest</span> and <span class="pkgName">selectr</span> to extract the dataset we need. First, we extract all JSON files using <span class="pkgName">jsonlite</span>, then export to csv.
+
+### <span class="header2">2.2 Web Scraping script</span>
+```{r results='hide', warning=FALSE, error=FALSE, cache=TRUE}
+setwd('/Users/n2n/RWorkingDirectory/WQD7004_group_project_git/')
+
+pagesNum <- c(1:10)
+inputFileNamePrefix <- "iprop_wangsa_maju"
+outputCsvFileName <- paste0(inputFileNamePrefix, "_df.csv")
+
+#create a function to extract json, and write to file
+extractJsonFromPage <- function(inputFileName, outputFileName){
+  iprop_html <- read_html(inputFileName)
+  script_nodes <- tail(iprop_html %>%
+                         html_nodes("script"))
+  pop <- html_text(script_nodes[[5]])
+  startIndex <- gregexpr('asyncData', pop)
+  endIndex <- gregexpr('false}}', pop)
+  jsonString <- substr(pop, startIndex[[1]] - 2, endIndex[[1]] + 6)
+
+  writeLines(jsonString, outputFileName)
+}
+
+for(i in pagesNum){
+  inputFileName <- paste0(inputFileNamePrefix, i, ".html")
+  outputFileName <- paste0(inputFileNamePrefix, i, ".json")
+  extractJsonFromPage(inputFileName, outputFileName)
+}
+
+#------------------------------
+#read JSON file and convert to csv
+#------------------------------
+#create an empty dataframe with 14 column and add column names
+df <- data.frame(matrix(ncol = 14, nrow = 0), stringsAsFactors = FALSE)
+
+#read json file
+convertJsonToList <- function(inputFileName){
+
+  propJson <- read_json(inputFileName)
+  listings <- (propJson['listings'])[[1]]
+  listingItems <- (listings['items'])[[1]]
+
+  mylist <- list() #create an empty list
+
+  for(i in 1:length(listingItems)){
+    listingItem1 <- listingItems[[i]]
+    fullName <- listingItem1$title
+    rental <- listingItem1$prices[[1]]$min
+    address <- listingItem1$address$formattedAddress
+    lat <- listingItem1$address$lat
+    lng <- listingItem1$address$lng
+    city <- listingItem1$multilanguagePlace$`en-GB`$level1
+    district <- listingItem1$multilanguagePlace$`en-GB`$level2
+    propertyName <- listingItem1$multilanguagePlace$`en-GB`$level3
+    bedrooms <- listingItem1$attributes$bedroom
+    bathrooms <- listingItem1$attributes$bathroom
+    builtUp <- listingItem1$attributes$builtUp
+    carParks <- listingItem1$attributes$carPark
+    furnishing <- listingItem1$attributes$furnishing
+    pricePerSizeUnitBuiltUp <- listingItem1$attributes$pricePerSizeUnitBuiltUp
+    buildingId <- listingItem1$attributes$buildingId
+    unitType <- listingItem1$attributes$unitType
+    postedDate <- listingItem1$postedAt
+    propertyType <- listingItem1$propertyType
+
+    mylist[[i]] <- list(fullName, propertyName, rental, pricePerSizeUnitBuiltUp, address,
+                        lat, lng, city, district, bedrooms, bathrooms, builtUp, carParks,
+                            furnishing, postedDate, buildingId, unitType, propertyType)
+  }
+
+  return(mylist)
+}
+
+myDfList <- list()
+for(i in 1:10){
+  inputFileName <- paste0(inputFileNamePrefix, i , ".json")
+  myDfList[[i]] <- convertJsonToList(inputFileName)
+}
+
+mainDf <- data.frame(matrix(ncol = 14, nrow = 0), stringsAsFactors = FALSE)
+for(i in 1:10){
+  temp_df <- do.call("rbind", myDfList[[i]])
+  mainDf <- rbind(mainDf, temp_df)
+}
+
+titles <- c("name", "propertyName", "rental","pricePerSizeUnitBuiltUp", "address",
+            "lat", "lng", "city", "district", "bedrooms", "bathrooms", "builtUp", "carParks",
+            "furnishing", "postedDate", "buildingId", "unitType",  "propertyType")
+
+# First coerce the data.frame to all-character
+mainDf <- data.frame(lapply(mainDf, as.character), stringsAsFactors=FALSE)
+write.table(mainDf, file = outputCsvFileName, sep = ",", col.names = titles, row.names = FALSE)
+```
+                              
+### <span class="header2">2.3 Merge to master dataframe</span>  
+We extracted JSON from HTML, and converted the json files to csv. All the 24 csv files under the directory were merged using ldply function as follow:  
+```{r results='hide', warning=FALSE, error=FALSE, cache=TRUE}
+setwd("/Users/n2n/RWorkingDirectory/WQD7004/merged_files")
+dataset <- ldply(list.files(), read.csv, header=TRUE)
+titles <- c("name", "propertyName", "rental","pricePerSizeUnitBuiltUp", "address",
+            "lat", "lng", "city", "district", "bedrooms", "bathrooms", "builtUp", "carParks",
+            "furnishing", "postedDate", "buildingId", "unitType",  "propertyType")
+write.table(dataset, file = "iprop_master_dataframe.csv", sep = ",", col.names = titles, row.names = FALSE)
+```
+
+### <span class="header2">2.4 Description of raw dataset</span>
+We will import the csv into master dataframe, and we call it "master_data". Subsequent analysis will be based on this dataframe.
+```{r results='hide', warning=FALSE, error=FALSE}
+master_data <- read.csv("/Users/n2n/RWorkingDirectory/WQD7004_group_project_git/iprop_master_dataframe.csv")
+```
+## {.tabset .tabset-pills .tabset-fade} 
+### Dimension & Preview{#tab1}  
+The dimension of the original dataset:  
+```{r}
+#dimension of the data frame
+dim(master_data)
+```  
+
+We use the package <span class="pkgName">paged_table</span> to display the first 20 rows from the dataset:
+```{r kable, results = "asis"}
+#First 10 rows of the dataset
+paged_table(head(master_data,20))
+```
+
+### Structure{#tab2}
+```{r}
+# Determine the structure of the dataset
+str(master_data)
+```
+
+### Summary{#tab3}
+```{r}
+# Summary of data
+summary(master_data)
+```
+
+## <span class="header1">3. Data Pre-processing</span>
+### <span class="header2">3.1 Remove rows</span>
+First, we are going remove the rows that doesn't have a propertyName, there are a total of 20 rows. We also noticed that there is one record of propertype Apartment, since our study only focused on Condo and Serviced Apartments, we are going to remove this record too.
+```{r}
+sprintf("Number of listings without a name: %s", count(master_data[master_data$propertyName == 'NULL',])) 
+master_data <- master_data %>% filter(propertyName != 'NULL')
+master_data <- master_data %>% filter(!(propertyType == 'Apartment'))
+count(master_data) #4738 records
+```
+
+### <span class="header2">3.2 Update the data type</span>
+Based on the structure, all columns are characters except rental column. So, we need to convert the data types first.
+```{r warning=FALSE}
+master_data$lat <- as.numeric(master_data$lat, options(digits = 6))
+master_data$lng <- as.numeric(master_data$lng,options(digits = 6))
+master_data$bathrooms <-as.numeric(master_data$bathrooms)
+master_data$builtUp <-as.numeric(gsub(",","",master_data$builtUp))
+master_data$carParks <-as.numeric(master_data$carParks)
+master_data$postedDate <-as.Date(master_data$postedDate)
+master_data$pricePerSizeUnitBuiltUp<-as.numeric(master_data$pricePerSizeUnitBuiltUp)
+master_data$buildingId <-as.numeric(master_data$buildingId)
+```
+### <span class="header2">3.3 Check for missing values</span>  
+
+Total number of rows with missing values
+```{r}
+sum(is.na(master_data))
+```  
+
+Let's check where are the missing value located:
+```{r}
+colSums(is.na(master_data))
+```  
+
+Next, we draw a missingness map to visualise:
+```{r}
+missmap(master_data)
+```
+
+### <span class="header2">3.4 Impute missing values</span>  
+We round up the number of carpark and bathroom rounded up due to they should be as a whole number and we are going to ignore lat and lng due to it would not affect our analysis.
+```{r}
+master_data_imputed <- master_data %>%  
+  group_by(district) %>%
+  mutate(builtUp = ifelse(is.na(builtUp),mean(builtUp,na.rm=TRUE),builtUp),
+         carParks = ifelse(is.na(carParks),round(mean(carParks,na.rm=TRUE),digits = 0),carParks),
+         bathrooms = ifelse(is.na(bathrooms),round(mean(bathrooms,na.rm=TRUE),digits = 0),bathrooms),
+         lat = ifelse(is.na(lat),round(mean(lat,na.rm=TRUE),digits = 0),lat),
+         lng = ifelse(is.na(lng),round(mean(lng,na.rm=TRUE),digits = 0),lng),
+         pricePerSizeUnitBuiltUp = ifelse(is.na(pricePerSizeUnitBuiltUp),round(mean(pricePerSizeUnitBuiltUp,na.rm=TRUE),digits = 0),pricePerSizeUnitBuiltUp))
+```  
+
+Let's verify the missing values again
+```{r}
+colSums(is.na(master_data_imputed))
+```
+
+### <span class="header2">3.5 Detect outliers</span>
+We are going to detect outliers in the based on the percentiles. With the percentiles method, all observations that lie outside the interval formed by the 2.5 and 97.5 percentiles will be considered as potential outliers. Other percentiles such as the 1 and 99, or the 5 and 95 percentiles can also be considered to construct the interval.   
+
+Based on the summary of data, we can observed that the main feature (i.e. rental) has a huge range. Let's check the summary and boxplot:
+
+```{r}
+summary(master_data_imputed$rental)
+```
+
+Boxplot of rental price
+```{r}
+# Store the graph
+box_plot <- ggplot(master_data_imputed, aes(y = rental))
+# Add the geometric object box plot
+box_plot +
+   geom_boxplot() +coord_flip()+ggtitle("Overall Price Boxplot")
+```
+
+Subsequently, we are going to identify the potential outliers in the column rental price with Percentile methods.
+
+```{r}
+lower_bound <- quantile(master_data_imputed$rental, 0.025)
+upper_bound <- quantile(master_data_imputed$rental, 0.975)
+
+outlier_ind <- master_data_imputed %>%
+   filter(rental < quantile(master_data_imputed$rental, 0.025) | rental > quantile(master_data_imputed$rental, 0.975))
+# A total 235 record found as outliers with the range of rental between 1150 and 12000
+
+## exclude outlier from the data
+master_data_clean <-  master_data_imputed %>%
+   filter(rental <= quantile(master_data$rental, 0.975) & rental >= quantile(master_data$rental, 0.025))
+```  
+
+We will examine the summary of rental price again after removing the outliers with percentile method.
+```{r}
+## Summary of rental after removing outliers
+summary(master_data_clean$rental)
+```  
+We noticed outliers in carParks column too. We will replacing those values with 1.
+```{r}
+master_data_clean[master_data_clean$carParks > 20, "carParks"] <- 1
+```
+
+### <span class="header2">3.6 Standardise values</span>
+
+Furthermore, we noticed that the column "furnishing" is not standardized when we check for the unique values.  
+```{r}
+unique(master_data_clean$furnishing)
+```  
+
+Hence, we need to do standardization for furnishing column.
+```{r}
+master_data_clean <- master_data_clean %>%
+   mutate(furnishing = ifelse(furnishing == "Fully furnished" | furnishing == "Fully Furnished", "Fully Furnished",
+                               ifelse(furnishing == "Partly furnished" | furnishing == "Partly Furnished", "Partly Furnished",
+                                      ifelse(furnishing == "NULL", "Unknown",
+                                      furnishing))))
+```
+Let's check the values again after standardization:
+```{r}
+unique(master_data_clean$furnishing)
+```
+
+### <span class="header2">3.7 Convert columns to factor</span>
+
+We noticed that bedrooms, furnishing types, property type, unit type and districts columns needed to be converted to factors. We will do this conversion using <span class="pkgName">dplyr</span> package:
+```{r}
+master_data_clean <- master_data_clean %>%
+  mutate(furnishing=factor(furnishing)) %>%
+  mutate(bedrooms=factor(bedrooms)) %>%
+  mutate(propertyType=factor(propertyType)) %>%
+  mutate(unitType=factor(unitType)) %>%
+  mutate(district=factor(district)) 
+```
+
+### <span class="header2">3.8 Drop unused features</span>
+
+There are total 18 features in the dataset that we have curated, we will drop some of the features that we will not be using for analysis:    
+```{r}
+master_data_clean <- master_data_clean %>% 
+  select(propertyName, rental, pricePerSizeUnitBuiltUp, lat, lng, district, bedrooms, bathrooms, builtUp, carParks, furnishing, buildingId, unitType, propertyType)
+```
+
+### <span class="header2">3.9 Final dataset for analysis</span>
+By now, we have handled all the data pre-processing steps. And the dataframe dimension after removing outliers is <b>4549</b> observations with <b>14</b> features.   
+
+## {.tabset .tabset-pills .tabset-fade} 
+### Summary of data
+```{r}
+summary(master_data_clean)
+```
+
+### Clean Dataset
+```{r}
+paged_table(master_data_clean)
+```
+
+
+## <span class="header1">4. Exploratory Data Analysis</span>
+### <span class="header2">4.1 Rental by district</span>
+```{r}
+# Store the graph
+box_plot <- ggplot(master_data_clean, aes(x = district,y = rental))
+# Add the geometric object box plot
+box_plot +
+   geom_boxplot() +coord_flip()+ggtitle("Boxplot of Rental by District")
+```  
+
+### <span class="header2">4.2 Top 10 most expensive areas</span>  
+
+Usually, mean value will be taken to plot the average. But in this case, the data is not evenly distributed, and a lot of outliers detected from the boxplot in section 4.1. Hence, it is more reasonable to take the median value for comparison instead of mean.
+
+```{r}
+group_by_district <- aggregate(list(master_data_clean$rental), list(master_data_clean$district), median)
+colnames(group_by_district) <- c("District","Avg_rental_price_by_District")
+group_by_district <- group_by_district[order(group_by_district$Avg_rental_price_by_District, decreasing = TRUE),]
+
+#reset the row index
+rownames(group_by_district) <- 1:24
+
+top_10_district <- head(group_by_district, 10)
+
+#plot the graph: top 10
+options(repr.plot.width=15, repr.plot.height=11)
+plot1 <- ggplot(data = top_10_district, mapping = aes(x = reorder(District, Avg_rental_price_by_District), y = Avg_rental_price_by_District)) +
+  geom_bar(stat = "identity", alpha = .8, size = 1.5, fill = "navyblue") +
+  labs(x = "District", y = "Average monthly rental price in (Ringgit Malaysia)") +
+  coord_flip() +
+  geom_label(mapping = aes(label = round(Avg_rental_price_by_District, 1)), size = 4, fill = "#F5FFFA", fontface = "bold") + ggtitle("Top 10 most expensive areas in Kuala Lumpur")
+plot1
+```  
+
+The most expensive areas in Kuala Lumpur can said to be Mont Kiara and average monthly rental price is around RM 3900. 
+
+### <span class="header2">4.3 Top 10 cheapest areas</span>  
+Next, we will plot out the 10 most affordable areas by rental price per month:
+
+```{r}  
+#plot the last 10
+last_10_districts <- tail(group_by_district, 10)
+
+options(repr.plot.width=15, repr.plot.height=11)
+plot2 <- ggplot(data = last_10_districts, mapping = aes(x = reorder(District, -Avg_rental_price_by_District), y = Avg_rental_price_by_District)) +
+  geom_bar(stat = "identity", alpha = .8, size = 1.5, fill = "#FF6666") +
+  labs(x = "District", y = "Average monthly rental price in (Ringgit Malaysia)") +
+  coord_flip() +
+  geom_label(mapping = aes(label = round(Avg_rental_price_by_District, 1)), size = 4, fill = "#F5FFFA", fontface = "bold") + ggtitle("Top 10 most affordable areas in Kuala Lumpur")
+plot2
+```  
+
+From the above visualization, we can summarize that Setapak and Kepong are the two most affordable areas in Kuala Lumpur.
+
+### <span class="header2">4.4 Analysis by property size</span>
+
+The built-up size of the houses varies from one building to another. In order to analyse the units, we have categorised them into 6 different general sizes, The distribution of the house sizes can be examined in the donut plot below.  
+```{r}
+library(ggrepel)
+count_by_condo_size = function(min, max){
+  count <- master_data_clean %>% filter(builtUp > min & builtUp <=max) %>% nrow()
+  count
+}
+
+df_builtup_summary <- data.frame(
+  category=c("<=600 sq.ft.", "600-900 sq.ft", "900-1200 sq.ft", "1200-1500 sq.ft", "1500-1800 sq.ft", ">1800 sq.ft"),
+  count=c(count_by_condo_size(0, 600), 
+          count_by_condo_size(600, 900), 
+          count_by_condo_size(900, 1200), 
+          count_by_condo_size(1200, 1500), 
+          count_by_condo_size(1500, 1800), 
+          count_by_condo_size(1800, max(master_data_clean$builtUp)))
+)
+
+df_builtup_summary$percentage = df_builtup_summary$count / sum(df_builtup_summary$count)* 100
+df_builtup_summary$ymax = cumsum(df_builtup_summary$percentage)
+df_builtup_summary$ymin = c(0, head(df_builtup_summary$ymax, n = -1))
+
+donut_plot = ggplot(df_builtup_summary, aes(fill = category, ymax = ymax, ymin = ymin, xmax = 100, xmin = 80)) +
+  geom_rect(colour = "black") +
+  coord_polar(theta = "y") + 
+  xlim(c(0, 100)) +
+  geom_label_repel(aes(label = paste(round(percentage,2),"%"), x = 100, y = (ymin + ymax)/2),inherit.aes = F, show.legend = F, size = 5)+
+  theme(legend.title = element_text(colour = "black", size = 10, face = "bold"), 
+        legend.text = element_text(colour = "black", size = 10), 
+        panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank()) +
+  annotate("text", x = 0, y = 0, size = 10, label = "Built-up Size")
+donut_plot
+```
+
+From the above chart, we can conclude that the most common types of unit are sized between 600-900sq.ft, 900-1200 sq.ft and 1200-1500sq.ft, which is about 77.36% of total units.
+
+### <span class="header2">4.5 Average price per built-up size</span>
+The rental price ranking in section 4.2 and 4.3 does not take the built-up size(square feet) into account. This section will plot the average price per unit square feet, with minimum and maximum on a ribbon chart.  
+
+```{r}
+# min, max, median
+summary_df <- master_data_clean %>% 
+  filter(pricePerSizeUnitBuiltUp < 10) %>%
+  group_by(district) %>%
+  summarize(Min = min(pricePerSizeUnitBuiltUp),
+    Avg = median(pricePerSizeUnitBuiltUp), 
+            Max = max(pricePerSizeUnitBuiltUp)) 
+summary_df <- summary_df %>% arrange(Max)
+
+# make district an ordered factor
+summary_df$district <- factor(summary_df$district, levels = summary_df$district)
+
+p1 <- ggplot(summary_df, mapping = aes(district, Avg, group = 1)) +
+  geom_ribbon(aes(ymin=Min,ymax=Max),color="yellow",fill = "yellow",alpha=0.5) + 
+  geom_line(color="#69b3a2") +
+  labs(x = "District", y = "Price per built up sq. ft (RM)", 
+       title = "Average price per built up size (with max and min price)") +
+  theme(axis.text.x=element_text(angle = 90, hjust = 0))
+  
+print(p1)
+```  
+
+From the above ribbon chart, we can examine the relationship between built-up size and rental price per square feet. The blue line is average rental per built-up size, and the yellow area depicts max and min prices. Some of the districts seems to have uniform distribution between the prices, but some districts has extreme price points. This could be due to the location, facilities, and many other factors.
+
+### <span class="header2">4.6 Correlation</span>
+To calculate the correlation among the variables, we will drop the first column propertyName, then convert factors to their numbers by applying <span class="pkgName">unclass</span>.
+```{r}
+master_data_clean_cor <- master_data_clean %>% select(rental, pricePerSizeUnitBuiltUp, lat, lng, bedrooms, bathrooms, builtUp, carParks, furnishing, buildingId, unitType, propertyType, district)
+
+master_data_clean_cor <- sapply(master_data_clean_cor, unclass) 
+
+correlations <- cor(master_data_clean_cor)
+```
+
+## {.tabset .tabset-pills .tabset-fade} 
+### Correlation Plot
+```{r}
+corrplot(correlations, type="upper", order="hclust")
+```  
+
+From this matrix, we can conclude that the the main features that might influence rental price are: pricePerSizeUnitBuiltUp, carParks and bathrooms.
+
+### Correlation Matrix
+Here's the full summary of correlation matrix among the features:
+```{r}
+print(correlations)
+```
+
+## <span class="header1">5. Classification</span>
+The objective of this section is to classify whether a house is expensive or cheap. We are going to take the median value instead of mean (because our dataset is not evenly distributed).   
+
+First, we will create a new target variale called "rental_class". <b>0</b> indicates <span class="emphasis">below average</span> and <b>1</b> indicates <span class="emphasis">above average</span>.
+
+```{r}
+median_rental <- median(master_data_clean$rental)
+master_data_clean$rental_class <- ifelse(master_data_clean$rental > median_rental, 1, 0)
+print(median_rental)
+```  
+From our dataset, the we take the average monthly rental price of <b>RM 2000</b>, perform Random Forest classificasion:  
+
+```{r cache=TRUE}
+master_data_analysis <- master_data_clean[3:15]
+master_data_analysis$rental_class <- as.character(master_data_analysis$rental_class)
+master_data_analysis$rental_class <- as.factor(master_data_analysis$rental_class)
+rf_model <- randomForest(rental_class ~ ., data=master_data_analysis, proximity=TRUE)
+varImpPlot(rf_model, main="Random Forest Model Classification")
+```  
+
+Based on the MeanDecreaseGini chart above, we can conclude that the <b>important features</b> for classification are: builtUp size, pricePerSizeUnitBuiltUp, district, bedrooms and bathrooms.
+
+Next Let's print out the confusion matrix of our RF model.
+```{r}
+rf_model
+```
+The total number of decision trees created in this model is <b>500</b>, the error rate is <b>2.51%</b> which is considered quite low. 
+
+## <span class="header1">6. Predictive Analysis</span>
+### <span class="header2">6.1 Grouping datasets</span>
+
+<b>Objective:</b> To build a linear model to predict house price.  
+
+<b>Target Variable:</b> <span class="emphasis">rental</span>  
+<b>First predictor:</b> <span class="emphasis">bathrooms</span>  
+<b>Second predictor:</b> <span class="emphasis">pricePerSizeUnitBuiltUp</span>  
+
+Let's calculate correlation coefficients between target variables and the two predictors for 4 different datasets that we have sampled:
+
+### {.tabset .tabset-pills .tabset-fade} 
+#### Dataset 1
+Dataset 1 is a collection of properties from 2 areas: Batu Caves, Bukit Jalil and Bukit Bintang.  
+```{r warning=FALSE, message=FALSE}
+new_dataset1 <- master_data_clean %>% 
+  filter(district == 'Batu Caves'|district == 'Bukit Jalil'|district == 'Bukit Bintang')
+dataset1_corb <- cor.test(new_dataset1$rental,new_dataset1$bathrooms,method = "pearson")
+dataset1_corp <- cor.test(new_dataset1$rental,new_dataset1$pricePerSizeUnitBuiltUp,method = "pearson")
+sprintf("Correlation coefficient of rental vs bathrooms: %f", dataset1_corb$estimate)
+sprintf("Correlation coefficient of rental vs pricePerSizeUnitBuiltUp: %f", dataset1_corp$estimate)
+new_dataset1 <- new_dataset1 %>% select(rental, pricePerSizeUnitBuiltUp, bathrooms)
+chart.Correlation(new_dataset1[,c(2,3,4)],histogram=TRUE,pch="19")
+```
+
+#### Dataset 2
+Dataset 2 consists of properties from: Batu Caves, Cheras, Kuchai Lama, Sri Hartamas and Sri Petaling.
+```{r warning=FALSE, message=FALSE}
+new_dataset2 <- master_data_clean %>% 
+  filter(district == 'Batu Caves'|district == 'Cheras'|district == 'Kuchai Lama'|district == 'Sri Hartamas'|district == 'Sri Petaling')
+dataset2_corb <- cor.test(new_dataset2$rental,new_dataset2$bathrooms,method = "pearson")
+dataset2_corp <- cor.test(new_dataset2$rental,new_dataset2$pricePerSizeUnitBuiltUp,method = "pearson")
+sprintf("Correlation coefficient of rental vs bathrooms: %f", dataset2_corb$estimate)
+sprintf("Correlation coefficient of rental vs pricePerSizeUnitBuiltUp: %f", dataset2_corp$estimate)
+new_dataset2 <- new_dataset2 %>% select(rental, pricePerSizeUnitBuiltUp, bathrooms)
+chart.Correlation(new_dataset2[,c(2,3,4)],histogram=TRUE,pch="19")
+```
+
+#### Dataset 3
+Dataset 3 is a compilation of properties from Sri Hartamas, Bangsar and Mont Kiara
+```{r warning=FALSE, message=FALSE}
+new_dataset3 <- master_data_clean %>% 
+  filter(district == 'Sri Hartamas'| district == 'Bangsar'|district == 'Mont Kiara')
+dataset3_corb <- cor.test(new_dataset3$rental,new_dataset3$bathrooms,method = "pearson")
+dataset3_corp <- cor.test(new_dataset3$rental,new_dataset3$pricePerSizeUnitBuiltUp,method = "pearson")
+sprintf("Correlation coefficient of rental vs bathrooms: %f", dataset3_corb$estimate)
+sprintf("Correlation coefficient of rental vs pricePerSizeUnitBuiltUp: %f", dataset3_corp$estimate)
+new_dataset3 <- new_dataset3 %>% select(rental, pricePerSizeUnitBuiltUp, bathrooms)
+chart.Correlation(new_dataset3[,c(2,3,4)],histogram=TRUE,pch="19")
+```
+
+#### Dataset 4
+Dataset 4 is a set of units from Batu Caves, Cheras, Kuchai Lama, Sri Hartamas and Sri Petaling.
+```{r warning=FALSE, message=FALSE}
+new_dataset4 <- master_data_clean %>% 
+  filter(district == 'Batu Caves'|district == 'Cheras'|district == 'Kuchai Lama'|district == 'Sri Hartamas'|district == 'Sri Petaling')
+dataset4_corb <- cor.test(new_dataset4$rental,new_dataset4$bathrooms,method = "pearson")
+dataset4_corp <- cor.test(new_dataset4$rental,new_dataset4$pricePerSizeUnitBuiltUp,method = "pearson")
+sprintf("Correlation coefficient of rental vs bathrooms: %f", dataset4_corb$estimate)
+sprintf("Correlation coefficient of rental vs pricePerSizeUnitBuiltUp: %f", dataset4_corp$estimate)
+new_dataset4 <- new_dataset4 %>% select(rental, pricePerSizeUnitBuiltUp, bathrooms)
+chart.Correlation(new_dataset4[,c(2,3,4)],histogram=TRUE,pch="19")
+```
+
+### <span class="header2">6.2 Split train-test samples</span>
+From section 6.1, based on the higher correlation values (with each dependent variables), we choose dataset 1 and dataset 3 to continue with linear regression models. 
+```{r}
+new_dataset <- rbind(new_dataset1,new_dataset3)
+dim(new_dataset)
+```
+Next, we are going to split our dataset into training set and test set with 70-30 ratio.
+```{r warning=FALSE, message=FALSE}
+set.seed(123)
+split = 0.70 #define an 70%/30% training/testing split of the dataset.
+training_set_index <- createDataPartition(new_dataset$district,p=split,list=FALSE)
+trainingset <- new_dataset[training_set_index,]
+testset <- new_dataset[-training_set_index,]
+dim(trainingset)
+dim(testset)
+```  
+We now have 779 rows in training dataset and 330 rows in test dataset.
+
+### <span class="header2">6.3 Linear Regression Models</span>
+We are going to train two linear regression models based on the train-test samples.   
+* Model 1: has one predictor which is the most correlated column with the #target(i.e bathrooms).   
+* Model 2: has two predictors, bathrooms and pricePerSizeUnitBuiltUp
+
+### {.tabset .tabset-pills .tabset-fade} 
+#### Model 1
+The first model will use only one predictor.
+```{r}
+linear_model_1_predictor<-lm(rental~bathrooms,data=trainingset)
+summary(linear_model_1_predictor)
+par(mfrow=c(2,2))
+plot(linear_model_1_predictor)
+```
+
+#### Model 2
+The second model uses two predictors against target variable "rental".
+```{r}
+linear_model_2_predictor<-lm(rental~pricePerSizeUnitBuiltUp+bathrooms,data=trainingset)
+summary(linear_model_2_predictor)
+par(mfrow=c(2,2))
+plot(linear_model_2_predictor)
+```
+
+### <span class="header2">6.4 Prediction</span>
+In this section, we are going to perform predictions with the models we trained in section 6.3.
+```{r warning=FALSE, message=FALSE}
+#Predictor1
+prediction_model1 <- predict(linear_model_1_predictor, testset)
+
+#Predictor2
+prediction_model2 <- predict(linear_model_2_predictor, testset)
+
+#plots
+par(mfrow=c(2,2))
+
+plot(testset$rental,type="l",lty=1.8,col="red")
+lines(prediction_model1,type="l",col="blue")
+plot(prediction_model1,type="l",lty=1.8,col="blue")
+
+plot(testset$rental,type="l",lty=1.8,col="red")
+lines(prediction_model2,type="l",col="blue")
+plot(prediction_model2,type="l",lty=1.8,col="blue")
+
+mtext("Predictions with model 1 (above) and model2 (below)", side = 3, line = -14, outer = TRUE)
+```
+
+### <span class="header2">6.5 Model Evaluation</span>
+Here are two scatter plots of the performance of model 2 over training set vs test set.
+```{r}
+plot_predictions <- function(linear_model_predictor, dataset){
+  pred = predict(linear_model_predictor,dataset)
+  act = dataset$rental
+  tst = data.frame(district = dataset$district,prediction = pred,actual = act)
+  tst = mutate(tst,delta = prediction - actual)
+  tstvar = round(var(tst$delta))
+  plot <- ggplot(tst,aes(x=actual,y=prediction,color=district)) + geom_point()  + geom_abline(intercept = 0, slope = 1, linetype="dashed")
+  plot
+}
+
+p1 <- plot_predictions(linear_model_2_predictor, trainingset)
+p2 <- plot_predictions(linear_model_2_predictor, testset)
+grid.arrange(p1, p2, ncol=2)
+```  
+
+Let's calculate accuracy of the above two models:
+```{r warning=FALSE, message=FALSE}
+calculate_accuracy_trainset <- function(linear_model, dataset){
+  # Fitted values of train data
+  pred_1_train = linear_model$fitted.values
+  
+  # Store actual price and predicted price in a data frame
+  actual_fitted = data.frame(actual=dataset$rental,predicted=pred_1_train)
+  
+  # Mean of absolute difference between predicted values and actual values
+  abs_diff = mean(abs(actual_fitted$actual-actual_fitted$predicted)/actual_fitted$actual)
+  
+  # % accuracy of the prediction with trainigset1
+  accuracy_train = 1 - abs_diff
+  
+  accuracy_train
+}
+
+calculate_accuracy_testset <- function(linear_model, dataset){
+  pred_1_test=predict(linear_model,dataset)
+  
+  # Store actual price and predicted price in a data frame
+  actual_fitted_test=data.frame(actual=dataset$rental, predicted=pred_1_test)
+  
+  # Mean of absolute difference between predicted values and actual values
+  abs_diff_test = mean(abs(actual_fitted_test$actual-actual_fitted_test$predicted)/actual_fitted_test$actual)
+  
+  # % accuracy of the prediction with testset1
+  accuracy_test = 1-abs_diff_test
+  accuracy_test
+}
+
+percent <- function(x, digits = 2, format = "f", ...) {
+  paste0(formatC(100 * x, format = format, digits = digits, ...), "%")
+}
+
+m1_train <- calculate_accuracy_trainset(linear_model_1_predictor, trainingset)
+m1_test <- calculate_accuracy_testset(linear_model_1_predictor, testset)
+m2_train <- calculate_accuracy_trainset(linear_model_2_predictor, trainingset)
+m2_test <- calculate_accuracy_testset(linear_model_2_predictor, testset)
+```
+Accuracy scores of the two model on trining and test data set as follows:  
+
+```{r echo=FALSE}
+result <- (c("model", "model 1 predictor", "model 2 predictor",
+             "train set", percent(m1_train), percent(m1_test), 
+             "test set", percent(m2_train), percent(m2_test)))
+accuracy_matrix <- matrix(result, nrow=3, ncol = 3)
+accuracy_matrix %>%
+  kbl(caption = "Accuracy scores of the two models") %>%
+  kable_classic(full_width = F)
+```
+
+Next we will compute the kendall’s tau accuracy for the predictions of the two prediction models above, to check how the rankings of the predicted values correlate with the actual target values in the test set.
+```{r}
+kt_for_model1_predictor <- cor(prediction_model1,testset$rental,method = "kendall")
+kt_for_model2_predictor <- cor(prediction_model2,testset$rental,method = "kendall")
+```
+Let's print out the accuracy scores:
+```{r warning=FALSE,echo=FALSE}
+result2 <- c("model", "model1 predictor", "model2 predictor",
+             "Kendall's Tau Accuracy", percent(kt_for_model1_predictor), 
+             percent(kt_for_model2_predictor));
+accuracy_matrix2 <- matrix(result2, nrow=3, ncol = 2)
+accuracy_matrix2 %>%
+  kbl(caption = "Kendall's Tau Correlation Coefficient") %>%
+  kable_classic(full_width = F)
+```
+Based on Kendalls tau correlations, we can conclude that the model with two predictors perform better.
+
+### <span class="header2">6.6 Perform Significance Test</span>
+For significance testing, we will run the models 50 times. Each time, we perform predictions on the test set and compute the Kendall's tau correlation. The Kendall's tau correlations for the models are kept separately in data two data frames.
+
+```{r warning=FALSE,message=FALSE}
+dataframe_prediction_one_predictor<-data.frame(prediction_one_predictor=double())
+dataframe_prediction_two_predictor<-data.frame(prediction_two_predictor=double())
+for (i in 1:50){
+  
+  linear_model_1_predictor<-lm(rental~bathrooms,data=trainingset)
+  linear_model_2_predictor<-lm(rental~pricePerSizeUnitBuiltUp+bathrooms,data=trainingset)
+  prediction_for_model_with_1_predictor<-predict(linear_model_1_predictor,testset)
+  prediction_for_model_with_2_predictors<-predict(linear_model_2_predictor,testset)
+  #Compute the kendall’s tau correlations for the predictions of the models.
+  
+  newRow_1_predictor<-data.frame(prediction_one_predictor=cor(prediction_for_model_with_1_predictor,testset$rental,method = "kendall"))
+  dataframe_prediction_one_predictor<-rbind(dataframe_prediction_one_predictor,newRow_1_predictor)
+  newRow_2_predictor<-data.frame(prediction_two_predictor=cor(prediction_for_model_with_2_predictors,testset$rental,method = "kendall"))
+  dataframe_prediction_two_predictor<-rbind(dataframe_prediction_two_predictor,newRow_2_predictor)
+}
+```
+Next, we are going to conduct <b>nonparametric test</b> due to the population sample size is small.
+
+```{r warning=FALSE, message=FALSE}
+qqnorm(dataframe_prediction_two_predictor$prediction_two_predictor, pch = 1, frame = FALSE)
+qqline(dataframe_prediction_two_predictor$prediction_two_predictor, col = "steelblue", lwd = 2)
+```
+
+A nonparametric test is obtained because qqplot shows the graph is not normally distributed.
+Next, we perform Wilcoxon test for significance using both data frames.
+
+```{r}
+wilcox.test(dataframe_prediction_one_predictor$prediction_one_predictor,dataframe_prediction_two_predictor$prediction_two_predictor,exact = FALSE)
+```
+
+## <span class="header1">7. Conclusion</span>
+To summarise the linear regression in section 6, 
+<ol>
+<li>In section 6.2, the Normal Q-Q plot for second linear regression <b>model(ii) looks much better</b> than the first linear regression model(i).</li>
+<li>Second model is an improvement. <b>Median residual</b> error is -19, which is better than -106 from the first model.</li>
+<li>In section 6.3, result of second regression model(two predictors) with test model show <b>similar trend</b> and it is better than first regression model(one predictor) with test model.</li>
+<li>Kendalls tau accuracy score for model2 <b>(71.26%)</b> is higher than model1(47.95%).</li>
+<li>Wilcoxon Signed-Rank test shows the p-value 2e-16 is way lesser than 0.05, we can conclude that there is <b>a significant difference</b> between the performance of the two machine learning models.</li>
+</ol>
+6) Also, model with 2 predictors is significantly better than 1 predictor, which is significant and <b>not by chance</b>.
